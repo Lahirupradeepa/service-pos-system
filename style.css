@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f3f4f6;
+}
+
+/* Hide print section normally */
+#print-receipt {
+    display: none;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+@media print {
+    /* Hide everything else */
+    body * {
+        visibility: hidden;
+    }
+    
+    /* Show only the receipt */
+    #print-receipt, #print-receipt * {
+        visibility: visible;
+    }
+    
+    #print-receipt {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        display: block;
+        padding: 20px;
+        margin: 0;
+    }
+
+    /* Print specific styling */
+    .no-print {
+        display: none !important;
+    }
+
+    @page {
+        margin: 0;
+    }
+}
