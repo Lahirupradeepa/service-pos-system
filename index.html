@@ -607,6 +607,35 @@
 
     <!-- App Logic -->
     <script src="app.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        // Obage Firebase Config eka
+        const firebaseConfig = {
+            apiKey: "AIzaSyBMftiPuBDLVuyLodNts28FXUtdK2ADM5k",
+            authDomain: "mypos-db-d3984.firebaseapp.com",
+            projectId: "mypos-db-d3984",
+            storageBucket: "mypos-db-d3984.firebasestorage.app",
+            messagingSenderId: "92954985114",
+            appId: "1:92954985114:web:e8c07bed8ea746e67f9523",
+            measurementId: "G-QHBCG87VTN",
+            // Realtime database wada karanna me URL eka aniwaryayen ona wenawa
+            databaseURL: "https://mypos-db-d3984-default-rtdb.firebaseio.com"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const firebaseDb = getDatabase(app);
+
+        // Data save karana function ekak (window ekata attach karala thiyenawa app.js eken call karanna lesi wenna)
+        window.saveSale = function (saleData) {
+            const salesRef = ref(firebaseDb, 'sales');
+            push(salesRef, saleData)
+                .then(() => console.log("Data saved to Firebase successfully!"))
+                .catch((error) => console.error("Error saving data to Firebase:", error));
+        }
+    </script>
 </body>
 
 </html>

@@ -775,24 +775,39 @@ async function handleCheckout() {
     }
 
     try {
-        // 1. Save Sale
-        const saleId = await db.sales.add({
+        // 1. Prepare Sale Data
+        const saleData = {
             customerName,
             bikeNumber,
             totalAmount,
             totalProfit,
             date: new Date().toISOString()
-        });
+        };
 
-        // 2. Save Sale Items & Reduce Stock
+        // 2. Save Sale to Local DB
+        const saleId = await db.sales.add(saleData);
+
+        // 3. Save Sale Items & Reduce Stock
+        const cartItemsForFirebase = []; // We will add items here to send to Firebase
+
         for (let item of currentCart) {
+            const itemProfit = item.type === 'part' ? (item.price - item.buyPrice) * item.qty : item.price * item.qty;
+
             await db.saleItems.add({
                 saleId,
                 itemName: item.itemName,
                 type: item.type,
                 price: item.price,
                 qty: item.qty,
-                profit: item.type === 'part' ? (item.price - item.buyPrice) * item.qty : item.price * item.qty
+                profit: itemProfit
+            });
+
+            cartItemsForFirebase.push({
+                itemName: item.itemName,
+                type: item.type,
+                price: item.price,
+                qty: item.qty,
+                profit: itemProfit
             });
 
             if (item.type === 'part') {
@@ -805,7 +820,16 @@ async function handleCheckout() {
             }
         }
 
-        // 3. Print Receipt
+        // -- FIREBASE LINK: Sync to Firebase online DB --
+        if (typeof window.saveSale === 'function') {
+            window.saveSale({
+                ...saleData,
+                localDbId: saleId,
+                items: cartItemsForFirebase
+            });
+        }
+
+        // 4. Print Receipt
         generateReceipt(saleId, customerName, bikeNumber, totalAmount, currentCart);
 
         // 4. Reset & Notify
