@@ -1,3 +1,18 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { getDatabase, ref, set, push, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+// Oyaage Firebase config eka (Ara photo eke thibba eka)
+const firebaseConfig = {
+    apiKey: "AIzaSyBMftiPuBDLVuyLodNts28FXUtdK2ADM5k",
+    authDomain: "mypos-db-d3984.firebaseapp.com",
+    projectId: "mypos-db-d3984",
+    storageBucket: "mypos-db-d3984.firebasestorage.app",
+    messagingSenderId: "92954985114",
+    appId: "1:92954985114:web:e8c07bed8ea746e67f9523"
+};
+
+const app = initializeApp(firebaseConfig);
+const db_cloud = getDatabase(app);
 // 1. Initialize Dexie Database
 const db = new Dexie("MotoPOSDB");
 
@@ -96,93 +111,51 @@ const formatCurrency = (amt) => parseFloat(amt).toFixed(2);
 // DASHBOARD LOGIC
 // ==========================================
 async function loadDashboard() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Start of today
+    const salesRef = ref(db_cloud, 'sales');
 
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    // Firebase cloud eken data kiyawanna
+    onValue(salesRef, (snapshot) => {
+        const data = snapshot.val();
 
-    const allSales = await db.sales.toArray();
-    const allSaleItems = await db.saleItems.toArray();
+        let todaySalesTotal = 0;
+        let todayProfitTotal = 0;
+        let monthSalesTotal = 0;
+        let recentSalesHTML = "";
 
-    let todaySalesTotal = 0;
-    let todayProfitTotal = 0;
-    let monthSalesTotal = 0;
-    let recentSalesHTML = "";
+        if (data) {
+            const allSales = Object.values(data);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-    // Sort descending by id
-    allSales.sort((a, b) => b.id - a.id);
+            // Sort descending (Aluthma ewa udaata)
+            allSales.reverse();
 
-    allSales.forEach(s => {
-        const saleDate = new Date(s.date);
+            allSales.forEach(s => {
+                const saleDate = new Date(s.date);
+                if (saleDate >= startOfMonth) monthSalesTotal += parseFloat(s.totalAmount);
+                if (saleDate >= today) {
+                    todaySalesTotal += parseFloat(s.totalAmount);
+                    todayProfitTotal += parseFloat(s.totalProfit || 0);
+                }
+            });
 
-        if (saleDate >= startOfMonth) {
-            monthSalesTotal += parseFloat(s.totalAmount);
+            // Recent Sales list eka hadanna
+            allSales.slice(0, 5).forEach(s => {
+                recentSalesHTML += `
+                    <tr class="hover:bg-gray-50 border-b">
+                        <td class="px-6 py-3">${s.customerName || 'Walk-in'} (${s.bikeNumber || ''})</td>
+                        <td class="px-6 py-3 font-bold text-gray-700">Rs ${parseFloat(s.totalAmount).toFixed(2)}</td>
+                    </tr>`;
+            });
         }
 
-        if (saleDate >= today) {
-            todaySalesTotal += parseFloat(s.totalAmount);
-            todayProfitTotal += parseFloat(s.totalProfit || 0);
-        }
+        // Dashboard eka update karanna
+        document.getElementById("dash-today-sales").innerText = Rs ${ todaySalesTotal.toFixed(2) };
+        document.getElementById("dash-today-profit").innerText = Rs ${ todayProfitTotal.toFixed(2) };
+        document.getElementById("dash-month-sales").innerText = Rs ${ monthSalesTotal.toFixed(2) };
+        document.getElementById("dash-recent-sales-list").innerHTML = recentSalesHTML || <tr><td colspan="2" class="text-center py-4 text-gray-400">No recent sales</td></tr>;
     });
-
-    // Populate top numbers
-    document.getElementById("dash-today-sales").innerText = `Rs ${formatCurrency(todaySalesTotal)}`;
-    document.getElementById("dash-today-profit").innerText = `Rs ${formatCurrency(todayProfitTotal)}`;
-    document.getElementById("dash-month-sales").innerText = `Rs ${formatCurrency(monthSalesTotal)}`;
-
-    // Populate recent sales table (last 5)
-    allSales.slice(0, 5).forEach(s => {
-        recentSalesHTML += `
-            <tr class="hover:bg-gray-50 border-b">
-                <td class="px-6 py-3">${s.customerName || 'Walk-in'} ${s.bikeNumber ? `(${s.bikeNumber})` : ''}</td>
-                <td class="px-6 py-3 font-bold text-gray-700">Rs ${formatCurrency(s.totalAmount)}</td>
-            </tr>
-        `;
-    });
-    document.getElementById("dash-recent-sales-list").innerHTML = recentSalesHTML || `<tr><td colspan="2" class="text-center py-4 text-gray-400">No recent sales</td></tr>`;
-
-    // Low Stock
-    const partsArray = await db.parts.toArray();
-    const lowStockParts = partsArray.filter(p => p.stockQuantity < 5);
-
-    document.getElementById("dash-low-stock-count").innerText = lowStockParts.length;
-    let lowStockHTML = "";
-    lowStockParts.forEach(p => {
-        lowStockHTML += `
-            <tr class="hover:bg-gray-50 border-b">
-                <td class="px-6 py-3 truncate max-w-[150px]" title="${p.name}">${p.name}</td>
-                <td class="px-6 py-3 font-bold text-red-600">${p.stockQuantity}</td>
-            </tr>
-        `;
-    });
-    document.getElementById("dash-low-stock-list").innerHTML = lowStockHTML || `<tr><td colspan="2" class="text-center py-4 text-gray-400">Inventory looks good</td></tr>`;
-
-    // Top Selling Items
-    const topSalesMap = {};
-    allSaleItems.forEach(item => {
-        let nameToUse = item.itemName;
-        // if item is service with assigned tech, strip tech name for grouping
-        if (item.type === 'service' && nameToUse.includes(' (')) {
-            nameToUse = nameToUse.substring(0, nameToUse.indexOf(' ('));
-        }
-        if (!topSalesMap[nameToUse]) topSalesMap[nameToUse] = 0;
-        topSalesMap[nameToUse] += item.qty;
-    });
-
-    const topSalesArr = Object.keys(topSalesMap).map(key => {
-        return { name: key, qty: topSalesMap[key] };
-    }).sort((a, b) => b.qty - a.qty).slice(0, 10); // get top 10
-
-    let topHTML = "";
-    topSalesArr.forEach(t => {
-        topHTML += `
-            <tr class="hover:bg-gray-50 border-b">
-                <td class="px-6 py-3 truncate max-w-[150px]" title="${t.name}">${t.name}</td>
-                <td class="px-6 py-3 text-right font-bold text-blue-700">${t.qty}</td>
-            </tr>
-        `;
-    });
-    document.getElementById("dash-top-selling-list").innerHTML = topHTML || `<tr><td colspan="2" class="text-center py-4 text-gray-400">No sales yet</td></tr>`;
 }
 
 // ==========================================
