@@ -1,83 +1,79 @@
-# Project: Motorbike Service Station & Spare Parts POS System
+# 🏍️ Motorbike Service Station POS System - Project Instructions
 
-## 1. Business Requirements (Mona wageda wenna ona?)
-
-Me system eken pradanama business awashyatha 4k cover wenna ona:
-
-### A. Inventory & Spare Parts Management
-* Pitin ganna spare parts system ekata add karaganna puluwan wenna ona (Name, Buy Price, Sell Price, Quantity).
-* Badu wikunana kota auto-stock adu wenna ona.
-* Stock iwara wenna laga ewa (Low Stock) alert wenna ona.
-
-### B. Service & Repair Management
-* Wash, Engine Oil Change, Repair wage service types define karanna puluwan wenna ona.
-* Wade karana Technician ge nama select karanna puluwan wenna ona.
-* Service charge eka invoice ekata add wenna ona.
-
-### C. Billing & Invoicing
-* Customer ge nama saha bike number eka record wenna ona.
-* Parts wala ganai, service charge ekai ekathu wela final bill eka hadenna ona.
-* Bill eka print karanna ho PDF ekak widihata ganna puluwan wenna ona.
-
-### D. Reporting & Dashboard
-* Dawase labaya (Profit) saha total sales bala ganna dashboard ekak.
-* Wadiyenma wikunapu parts saha wadiyenma karapu service monawada kiyala bala ganna puluwan wenna ona.
+Me file eke thiyenne ube service station ekata awashya full online POS system eka hadaganna ona "Business Requirements" saha "Technical Steps" tika.
 
 ---
 
-## 2. Technical Requirements (Hadanne kohomada?)
+## 1. Business Requirements (Mokadda wenne ona?)
 
-### A. Tech Stack
-* **Frontend:** HTML5, Tailwind CSS (Design eka lesiyen lassanata ganna).
-* **Logic:** Vanilla JavaScript (ES6+).
-* **Database:** Dexie.js (IndexedDB wrap karapu library ekak - Browser eke data save karanna).
-
-### B. System Architecture
-1.  **Offline-First:** Internet nathuwath system eka wada karanna ona.
-2.  **Responsive Design:** Desktop eken wagema Tab ekakin unath use karanna puluwan wenna ona.
-3.  **Modular Code:** HTML files wenama saha JS logic wenama thibunama lesiyi.
+* **Dashboard:** Adha dawase thiyena total sales, iwara wenna langa spare parts (Low Stock), saha service karanna thiyena bikes gana overview ekak penna ona.
+* **Inventory Management (Items):** Spare parts wala nam, price, thiyena pramanaya (quantity) add karanna saha edit karanna puluwan wenna ona.
+* **Billing System:** Customer kenekge details (Nama, Bike No) ekka gaththa badu saha karapu service (Body wash, Repair) walata invoice ekak hadanna puluwan wenna ona.
+* **Customer Database:** Customer ge history eka (kalin service kare kawadda wage dewal) save wenna ona.
+* **Item Receiving:** Aluthen stock eddi ewa system ekata add karaganna puluwan wenna ona.
+* **Automated Reports:** Hama dawasema reeta (ho button ekakin) Sales Report eka saha Stock Report eka EmailJS haraha ube email ekata auto wenna ona.
 
 ---
 
-## 3. Database Schema (Dexie.js setup eka)
+## 2. Technical Stack (Mawage dewalda use karanne?)
 
-Data table tika me widihata thiyenna ona:
-
-* **parts:** `++id, name, buyPrice, sellPrice, stockQuantity`
-* **services:** `++id, serviceName, cost`
-* **technicians:** `++id, name, phone`
-* **sales:** `++id, customerName, bikeNumber, totalAmount, date`
-* **saleItems:** `++id, saleId, itemName, type (part/service), price, qty`
+* **Frontend:** HTML5, **Tailwind CSS** (Design ekata), JavaScript (Logic ekata).
+* **Local Database:** **Dexie.js** (Browser eka athule data thiyaganna - speed eka wedi wenna).
+* **Cloud Backend/Backup:** **Firebase (Realtime Database)** - Browser eka change kalath data load wenna meka thamai use wenne.
+* **Reporting:** **EmailJS** - Email yawanna use karana service eka.
 
 ---
 
-## 4. Functional Modules (Hadiya yuthu kotas)
+## 3. Database Structure (Data save wenna ona vidiya)
 
-### Phase 1: Dashboard
-* Total Sales (Today/Monthly).
-* Total Profit.
-* Low Stock Items table ekak.
-
-### Phase 2: Inventory Management
-* Form ekak spare parts add karanna.
-* Table ekak thiyana stock eka edit/delete karanna.
-
-### Phase 3: POS Interface (Main Screen)
-* **Search Bar:** Part ekak search karala bill ekata add karanna.
-* **Service Selector:** Service eka saha technician select karanna.
-* **Cart View:** Add karapu items wala list eka saha sub-total eka.
-* **Checkout:** "Print Bill" button eka ebama data save wela receipt eka generator wenna ona.
-
-### Phase 4: Reports
-* Range ekak athulatha (eg: Jan 1 to Jan 31) sales report eka filter karanna.
+Firebase saha Dexie wala me table tika thiyenna ona:
+1.  **Items:** `id, itemName, category, price, quantity, lowStockLimit`
+2.  **Sales:** `id, customerName, bikeNumber, date, items(list), totalAmount, technicianName`
+3.  **Customers:** `id, name, phone, bikeNumber, lastServiceDate`
 
 ---
 
-## 5. Development Instructions (Piliganna ona piyawara)
+## 4. Implementation Steps (Peliwela)
 
-1.  **Project Setup:** Folder ekak hadala `index.html`, `style.css`, `app.js` file hadaganna. Tailwind CSS CDN eka link karaganna.
-2.  **Database Initialize:** `app.js` eke Dexie instance ekak create karala tables define karanna.
-3.  **UI Building:** Tailwind use karala sidebar ekak saha main content area ekak hadanna.
-4.  **CRUD Logic:** Parts add karana saha save karana functions liyanna.
-5.  **Billing Logic:** Array ekakata items add karala, eka Dexie `sales` table ekata save karana function eka hadanna.
-6.  **Print Template:** `@media print` CSS use karala bill eka lassanata print wenna hadanna.
+### Step 1: UI Dashboard Design (Tailwind CSS)
+Tailwind CDN eka use karala simple side bar ekak saha main content area ekak hadanna. 
+* Menu items: Dashboard, Billing, Inventory, Reports, Settings.
+
+### Step 2: Firebase Connection
+Uba deepu configuration eka `firebase.js` kiyala file ekaka hadala, Firebase initialize karanna. Data `set()` saha `onValue()` functions use karala Firebase ekka sync karanna.
+
+### Step 3: Dexie.js Setup (Local Storage)
+Dexie use karanne browser eka offline giyath ho data load wenna thiyena vegaya wedi karannai. 
+* Browser eke Dexie data store karanna.
+* Aluthen item ekak add karaddi eka **Dexie ekata saha Firebase ekata dekakatama** save karanna.
+
+### Step 4: Billing & Logic
+* Billing page eke item ekak select karaddi stock eken eka adu wenna code eka liyanna.
+* Invoice eka generate unama eka Firebase `sales` kiyana path ekata save karanna.
+
+### Step 5: Data Sync (Multi-browser support)
+Uba wena browser ekakin log weddi:
+1.  Firebase eke thiyena data tika ganna (`once` method).
+2.  Ewa Dexie (Local DB) ekata bulk add karanna.
+3.  Ethakota browser dekema data ekama widiyata penawi.
+
+### Step 6: EmailJS Integration
+* EmailJS account ekak hadala Service ID, Template ID saha Public Key ganna.
+* JS function ekak liyanna Sales Report eka table ekak widiyata string ekakata harawala `emailjs.send()` haraha ube mail ekata yawanna.
+
+---
+
+## 5. Security & Backups
+
+* Firebase **Rules** update karanna ube email eken vitharak data read/write karanna puluwan widiyata.
+* Hama transaction ekakatama passe `last_sync_time` eka check karala local database eka update karanna.
+
+---
+
+## 6. Checklist (Iwara unada balanna)
+
+- [ ] Dashboard eke ada income eka penawada?
+- [ ] Item ekak wikunaddi stock eka auto adu wenawada?
+- [ ] Browser eka refresh karama data thiyenawada?
+- [ ] Wena device ekakin log weddi data load wenawada?
+- [ ] Sales report eka email ekata enawada?
