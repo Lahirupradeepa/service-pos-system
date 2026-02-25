@@ -1,6 +1,3 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, set, push, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
-
 // Oyaage Firebase config eka (Ara photo eke thibba eka)
 const firebaseConfig = {
     apiKey: "AIzaSyBMftiPuBDLVuyLodNts28FXUtdK2ADM5k",
@@ -8,11 +5,12 @@ const firebaseConfig = {
     projectId: "mypos-db-d3984",
     storageBucket: "mypos-db-d3984.firebasestorage.app",
     messagingSenderId: "92954985114",
-    appId: "1:92954985114:web:e8c07bed8ea746e67f9523"
+    appId: "1:92954985114:web:e8c07bed8ea746e67f9523",
+    databaseURL: "https://mypos-db-d3984-default-rtdb.firebaseio.com" // Me line eka hariyata thiyenna ona
 };
 
-const app = initializeApp(firebaseConfig);
-const db_cloud = getDatabase(app);
+const app = firebase.initializeApp(firebaseConfig);
+const db_cloud = firebase.database();
 // 1. Initialize Dexie Database
 const db = new Dexie("MotoPOSDB");
 
@@ -111,10 +109,10 @@ const formatCurrency = (amt) => parseFloat(amt).toFixed(2);
 // DASHBOARD LOGIC
 // ==========================================
 async function loadDashboard() {
-    const salesRef = ref(db_cloud, 'sales');
+    const salesRef = db_cloud.ref('sales');
 
     // Firebase cloud eken data kiyawanna
-    onValue(salesRef, (snapshot) => {
+    salesRef.on('value', (snapshot) => {
         const data = snapshot.val();
 
         let todaySalesTotal = 0;
@@ -151,10 +149,10 @@ async function loadDashboard() {
         }
 
         // Dashboard eka update karanna
-        document.getElementById("dash-today-sales").innerText = Rs ${ todaySalesTotal.toFixed(2) };
-        document.getElementById("dash-today-profit").innerText = Rs ${ todayProfitTotal.toFixed(2) };
-        document.getElementById("dash-month-sales").innerText = Rs ${ monthSalesTotal.toFixed(2) };
-        document.getElementById("dash-recent-sales-list").innerHTML = recentSalesHTML || <tr><td colspan="2" class="text-center py-4 text-gray-400">No recent sales</td></tr>;
+        document.getElementById("dash-today-sales").innerText = `Rs ${todaySalesTotal.toFixed(2)}`;
+        document.getElementById("dash-today-profit").innerText = `Rs ${todayProfitTotal.toFixed(2)}`;
+        document.getElementById("dash-month-sales").innerText = `Rs ${monthSalesTotal.toFixed(2)}`;
+        document.getElementById("dash-recent-sales-list").innerHTML = recentSalesHTML || '<tr><td colspan="2" class="text-center py-4 text-gray-400">No recent sales</td></tr>';
     });
 }
 
