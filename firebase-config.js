@@ -4,13 +4,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebas
 import { getDatabase } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyBMftIPuBDLVuyLodNts28fXUtdK2ADM5k",
+  authDomain: "mypos-db-d3984.firebaseapp.com",
+  databaseURL: "https://mypos-db-d3984-default-rtdb.firebaseio.com",
+  projectId: "mypos-db-d3984",
+  storageBucket: "mypos-db-d3984.firebasestorage.app",
+  messagingSenderId: "92954985114",
+  appId: "1:92954985114:web:e8c07bed8ea746e67f9523",
+  measurementId: "G-QHBGC87VTN"
 };
 
 const app = initializeApp(firebaseConfig);
