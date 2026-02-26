@@ -10,6 +10,13 @@ localDB.version(2).stores({
     customers: 'id, name, phone, bikeNumber, lastServiceDate',
     technicians: 'id, name'
 });
+localDB.version(3).stores({
+    items: 'id, itemName, partNumber, category, costPrice, price, quantity, lowStockLimit',
+    sales: 'id, customerName, phone, bikeNumber, date, items, totalAmount, technicianName',
+    customers: 'id, name, phone, bikeNumber, lastServiceDate',
+    technicians: 'id, name',
+    receivings: 'id, date, supplier, partName, partNumber, itemId, qty, unitCost, totalCost, invoiceNo, notes, timestamp'
+});
 
 // UI State
 let currentBillItems = [];
@@ -58,7 +65,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         billItemsList: document.getElementById('bill-items-list'),
         billTotalAmount: document.getElementById('bill-total-amount'),
         btnCheckout: document.getElementById('btn-checkout'),
-        btnPrintBill: document.getElementById('btn-print-bill'),
+        bikeAutofillIndicator: document.getElementById('bike-autofill-indicator'),
+
+        // Bill View Modal
+        modalViewBill: document.getElementById('modal-view-bill'),
+        btnCloseBillModal: document.getElementById('btn-close-bill-modal'),
+        billModalContent: document.getElementById('bill-modal-content'),
+        billModalCustomerInfo: document.getElementById('bill-modal-customer-info'),
 
         // Dashboard Stats
         todaySalesVal: document.getElementById('today-sales-val'),
@@ -98,12 +111,57 @@ document.addEventListener('DOMContentLoaded', async () => {
         shopSettingsStatus: document.getElementById('shop-settings-status'),
         billHeaderPreview: document.getElementById('bill-header-preview'),
         sidebarShopName: document.getElementById('sidebar-shop-name'),
+
+        // Parts Receiving
+        btnAddReceiving: document.getElementById('btn-add-receiving'),
+        modalAddReceiving: document.getElementById('modal-add-receiving'),
+        btnCancelReceiving: document.getElementById('btn-cancel-receiving'),
+        btnSaveReceiving: document.getElementById('btn-save-receiving'),
+        receivingId: document.getElementById('receiving-id'),
+        receivingDate: document.getElementById('receiving-date'),
+        receivingSupplier: document.getElementById('receiving-supplier'),
+        receivingItemLink: document.getElementById('receiving-item-link'),
+        receivingPartName: document.getElementById('receiving-part-name'),
+        receivingPartNumber: document.getElementById('receiving-part-number'),
+        receivingQty: document.getElementById('receiving-qty'),
+        receivingUnitCost: document.getElementById('receiving-unit-cost'),
+        receivingTotalCost: document.getElementById('receiving-total-cost'),
+        receivingInvoice: document.getElementById('receiving-invoice'),
+        receivingUpdateStock: document.getElementById('receiving-update-stock'),
+        receivingNotes: document.getElementById('receiving-notes'),
+        receivingsList: document.getElementById('receivings-list'),
+        receivingSearch: document.getElementById('receiving-search'),
+        receivingFilterMonth: document.getElementById('receiving-filter-month'),
+        btnReceivingFilter: document.getElementById('btn-receiving-filter'),
+        btnReceivingClear: document.getElementById('btn-receiving-clear'),
+        receivingTotalCount: document.getElementById('receiving-total-count'),
+        receivingMonthCost: document.getElementById('receiving-month-cost'),
+        receivingSupplierCount: document.getElementById('receiving-supplier-count'),
+
+        // Item History Modal
+        modalItemHistory: document.getElementById('modal-item-history'),
+        btnCloseItemHistory: document.getElementById('btn-close-item-history'),
+        itemHistoryTitle: document.getElementById('item-history-title'),
+        itemHistoryInfo: document.getElementById('item-history-info'),
+        itemHistoryContent: document.getElementById('item-history-content'),
+        ihTabSales: document.getElementById('ih-tab-sales'),
+        ihTabReceiving: document.getElementById('ih-tab-receiving'),
     };
 
     setupEventListeners();
     loadEmailJsSettings();
     loadShopSettings();
     await renderAllLocal();
+
+    // Set today's date as default for receiving form
+    if (UIElements.receivingDate) {
+        UIElements.receivingDate.value = getTodayString();
+    }
+    // Set current month as default filter
+    if (UIElements.receivingFilterMonth) {
+        const now = new Date();
+        UIElements.receivingFilterMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
 
     if (window.db) {
         UIElements.syncStatus.classList.remove('hidden');
@@ -134,6 +192,7 @@ function setupEventListeners() {
 
             if (target === 'billing') updateBillingOptions();
             if (target === 'technicians') renderTechnicians();
+            if (target === 'parts-receiving') renderReceivings();
         });
     });
 
@@ -141,8 +200,7 @@ function setupEventListeners() {
     UIElements.btnCancelItem.addEventListener('click', closeModal);
     UIElements.btnSaveItem.addEventListener('click', saveInventoryItem);
     UIElements.btnAddToBill.addEventListener('click', addToBill);
-    UIElements.btnCheckout.addEventListener('click', completeSale);
-    UIElements.btnPrintBill.addEventListener('click', printBill);
+    UIElements.btnCheckout.addEventListener('click', completeSaleAndPrint);
     UIElements.btnSendReport.addEventListener('click', sendReportViaEmail);
     UIElements.btnSaveEjs.addEventListener('click', saveEmailJsSettings);
     UIElements.btnTestEjs.addEventListener('click', testEmailJs);
@@ -165,6 +223,67 @@ function setupEventListeners() {
             UIElements.partSearchResults.classList.add('hidden');
         }
     });
+
+    // Bike Number Auto-fill
+    UIElements.billBikeNumber.addEventListener('input', handleBikeNumberInput);
+
+    // Bill View Modal close
+    UIElements.btnCloseBillModal.addEventListener('click', () => {
+        UIElements.modalViewBill.classList.add('hidden');
+    });
+    UIElements.modalViewBill.addEventListener('click', (e) => {
+        if (e.target === UIElements.modalViewBill) UIElements.modalViewBill.classList.add('hidden');
+    });
+
+    // Backup / Export buttons
+    document.getElementById('btn-export-sales').addEventListener('click', () => exportSheet('sales'));
+    document.getElementById('btn-export-customers').addEventListener('click', () => exportSheet('customers'));
+    document.getElementById('btn-export-inventory').addEventListener('click', () => exportSheet('inventory'));
+    document.getElementById('btn-export-bills').addEventListener('click', () => exportSheet('bills'));
+    document.getElementById('btn-export-technicians').addEventListener('click', () => exportSheet('technicians'));
+    document.getElementById('btn-export-all').addEventListener('click', () => exportSheet('all'));
+
+    // Parts Receiving
+    UIElements.btnAddReceiving.addEventListener('click', () => openReceivingModal());
+    UIElements.btnCancelReceiving.addEventListener('click', closeReceivingModal);
+    UIElements.btnSaveReceiving.addEventListener('click', saveReceiving);
+    UIElements.modalAddReceiving.addEventListener('click', (e) => {
+        if (e.target === UIElements.modalAddReceiving) closeReceivingModal();
+    });
+    // Auto-calc total cost
+    UIElements.receivingQty.addEventListener('input', calcReceivingTotal);
+    UIElements.receivingUnitCost.addEventListener('input', calcReceivingTotal);
+    // Auto-fill from inventory item
+    UIElements.receivingItemLink.addEventListener('change', async (e) => {
+        const id = e.target.value;
+        if (!id) return;
+        const item = await localDB.items.get(id);
+        if (item) {
+            UIElements.receivingPartName.value = item.itemName;
+            UIElements.receivingPartNumber.value = item.partNumber || '';
+            if (item.costPrice > 0) UIElements.receivingUnitCost.value = item.costPrice;
+            calcReceivingTotal();
+        }
+    });
+    // Filter
+    UIElements.btnReceivingFilter.addEventListener('click', renderReceivings);
+    UIElements.btnReceivingClear.addEventListener('click', () => {
+        UIElements.receivingSearch.value = '';
+        UIElements.receivingFilterMonth.value = '';
+        renderReceivings();
+    });
+    UIElements.receivingSearch.addEventListener('keydown', (e) => { if (e.key === 'Enter') renderReceivings(); });
+
+    // Item History Modal close
+    UIElements.btnCloseItemHistory.addEventListener('click', () => {
+        UIElements.modalItemHistory.classList.add('hidden');
+    });
+    UIElements.modalItemHistory.addEventListener('click', (e) => {
+        if (e.target === UIElements.modalItemHistory) UIElements.modalItemHistory.classList.add('hidden');
+    });
+    // Item History Tabs
+    UIElements.ihTabSales.addEventListener('click', () => switchItemHistoryTab('sales'));
+    UIElements.ihTabReceiving.addEventListener('click', () => switchItemHistoryTab('receiving'));
 }
 
 // -----------------------------------------------------------------------
@@ -194,6 +313,7 @@ async function renderAllLocal() {
     await renderCustomers();
     await renderTechnicians();
     await updateTechnicianDropdown();
+    await renderReceivings();
 }
 
 // -----------------------------------------------------------------------
@@ -257,6 +377,19 @@ function initSync() {
         await updateTechnicianDropdown();
     }, (error) => {
         console.error("Firebase Technicians Sync Error:", error);
+    });
+
+    // 5. Receivings Sync
+    window.db.ref('receivings').on('value', async (snapshot) => {
+        const data = snapshot.val();
+        await localDB.receivings.clear();
+        if (data) {
+            const arr = Object.values(data);
+            await localDB.receivings.bulkPut(arr);
+        }
+        await renderReceivings();
+    }, (error) => {
+        console.error("Firebase Receivings Sync Error:", error);
     });
 }
 
@@ -343,7 +476,9 @@ async function renderInventory() {
         <tr class="border-b hover:bg-gray-50">
             <td class="p-2 text-xs text-gray-500 font-mono">${item.partNumber || '<span class="text-gray-300">—</span>'}</td>
             <td class="p-2">
-                ${item.itemName}
+                <button class="font-medium text-left hover:text-blue-600 hover:underline btn-item-history cursor-pointer" data-id="${item.id}" title="View item history">
+                    ${item.itemName}
+                </button>
                 ${isLow ? '<span class="bg-red-100 text-red-800 text-xs px-2 py-0.5 rounded ml-2 font-bold">LOW</span>' : ''}
             </td>
             <td class="p-2"><span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded">${item.category}</span></td>
@@ -355,6 +490,9 @@ async function renderInventory() {
                 ${item.category === 'Service' ? '<i class="fas fa-infinity text-gray-400"></i>' : item.quantity}
             </td>
             <td class="p-2 flex space-x-1">
+                <button class="text-indigo-600 hover:bg-indigo-50 p-2 rounded btn-item-history" data-id="${item.id}" title="View History">
+                    <i class="fas fa-history pointer-events-none"></i>
+                </button>
                 <button class="text-blue-600 hover:bg-blue-50 p-2 rounded btn-edit-item" data-id="${item.id}" title="Edit">
                     <i class="fas fa-edit pointer-events-none"></i>
                 </button>
@@ -364,6 +502,14 @@ async function renderInventory() {
             </td>
         </tr>`;
     }).join('');
+
+    document.querySelectorAll('.btn-item-history').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.getAttribute('data-id');
+            const item = await localDB.items.get(id);
+            if (item) openItemHistoryModal(item);
+        });
+    });
 
     document.querySelectorAll('.btn-edit-item').forEach(btn => {
         btn.addEventListener('click', async (e) => {
@@ -562,6 +708,47 @@ function renderBillItems() {
     });
 }
 
+// -----------------------------------------------------------------------
+// BILLING – Bike Number Auto-fill
+// -----------------------------------------------------------------------
+async function handleBikeNumberInput() {
+    const bikeNum = UIElements.billBikeNumber.value.trim().toUpperCase();
+    const indicator = UIElements.bikeAutofillIndicator;
+
+    if (bikeNum.length < 3) {
+        indicator.classList.add('hidden');
+        return;
+    }
+
+    // Search in customers table
+    const allCustomers = await localDB.customers.toArray();
+    const match = allCustomers.find(c =>
+        c.bikeNumber && c.bikeNumber.toUpperCase() === bikeNum
+    );
+
+    if (match) {
+        // Only fill if fields are currently empty
+        if (!UIElements.billCustomerName.value.trim()) {
+            UIElements.billCustomerName.value = match.name || '';
+        }
+        if (!UIElements.billPhone.value.trim()) {
+            UIElements.billPhone.value = match.phone !== 'N/A' ? match.phone : '';
+        }
+        indicator.classList.remove('hidden');
+    } else {
+        indicator.classList.add('hidden');
+    }
+}
+
+async function completeSaleAndPrint() {
+    // First save the sale
+    const saved = await completeSale();
+    // If sale was saved successfully, print
+    if (saved) {
+        printBill(saved);
+    }
+}
+
 async function completeSale() {
     const customerName = UIElements.billCustomerName.value.trim();
     const phone = UIElements.billPhone.value.trim() || 'N/A';
@@ -615,24 +802,37 @@ async function completeSale() {
         }
 
         showToast('✅ Sale completed & saved!');
+
+        // Capture bill data BEFORE clearing for print
+        const savedSaleData = { ...saleData };
+
         currentBillItems = [];
         renderBillItems();
         UIElements.billCustomerName.value = '';
         UIElements.billBikeNumber.value = '';
         UIElements.billPhone.value = '';
         UIElements.billTechnician.value = '';
+        if (UIElements.bikeAutofillIndicator) UIElements.bikeAutofillIndicator.classList.add('hidden');
+
+        return savedSaleData;  // return for print
 
     } catch (e) {
         showToast('Error completing sale', 'error');
         console.error(e);
+        return null;
     }
 }
 
 // -----------------------------------------------------------------------
 // PRINT BILL
 // -----------------------------------------------------------------------
-function printBill() {
-    if (currentBillItems.length === 0) {
+function printBill(saleDataOverride = null) {
+    // Use override data (from completeSaleAndPrint) OR current form + bill items
+    const useOverride = saleDataOverride && saleDataOverride.items && saleDataOverride.items.length > 0;
+
+    const itemsToPrint = useOverride ? saleDataOverride.items : currentBillItems;
+
+    if (!useOverride && currentBillItems.length === 0) {
         showToast('Add items to the bill before printing!', 'error');
         return;
     }
@@ -644,11 +844,11 @@ function printBill() {
     const shopNote = shop.note || 'Thank you for your business!';
     const shopLogo = shop.logo || '';
 
-    const customerName = UIElements.billCustomerName.value.trim() || 'Walk-in';
-    const bikeNumber = UIElements.billBikeNumber.value.trim() || 'N/A';
-    const phone = UIElements.billPhone.value.trim() || 'N/A';
-    const technician = UIElements.billTechnician.value.trim() || 'N/A';
-    const total = currentBillItems.reduce((sum, i) => sum + i.total, 0);
+    const customerName = useOverride ? (saleDataOverride.customerName || 'Walk-in') : (UIElements.billCustomerName.value.trim() || 'Walk-in');
+    const bikeNumber = useOverride ? (saleDataOverride.bikeNumber || 'N/A') : (UIElements.billBikeNumber.value.trim() || 'N/A');
+    const phone = useOverride ? (saleDataOverride.phone || 'N/A') : (UIElements.billPhone.value.trim() || 'N/A');
+    const technician = useOverride ? (saleDataOverride.technicianName || 'N/A') : (UIElements.billTechnician.value.trim() || 'N/A');
+    const total = itemsToPrint.reduce((sum, i) => sum + i.total, 0);
     const now = new Date();
     const dateStr = now.toLocaleDateString('en-LK', { year: 'numeric', month: 'short', day: 'numeric' });
     const timeStr = now.toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit' });
@@ -658,7 +858,7 @@ function printBill() {
         ? `<img src="${shopLogo}" style="max-height:70px;max-width:160px;object-fit:contain;display:block;margin:0 auto 4px;" />`
         : '';
 
-    const itemRows = currentBillItems.map(i => `
+    const itemRows = itemsToPrint.map(i => `
         <tr>
             <td style="padding:3px 4px;border-bottom:1px dashed #ccc;">${i.itemName}${i.partNumber ? '<br><span style="font-size:10px;color:#666">' + i.partNumber + '</span>' : ''}</td>
             <td style="padding:3px 4px;text-align:center;border-bottom:1px dashed #ccc;">${i.qty}</td>
@@ -790,7 +990,7 @@ async function updateTechnicianDropdown() {
 async function renderCustomers() {
     const customers = await localDB.customers.toArray();
     if (customers.length === 0) {
-        UIElements.customersList.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-400"><i class="fas fa-users text-3xl mb-2 block"></i>No customers yet</td></tr>`;
+        UIElements.customersList.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-gray-400"><i class="fas fa-users text-3xl mb-2 block"></i>No customers yet</td></tr>`;
         return;
     }
     UIElements.customersList.innerHTML = customers
@@ -799,9 +999,88 @@ async function renderCustomers() {
         <tr class="border-b hover:bg-gray-50">
             <td class="p-2 font-medium">${c.name}</td>
             <td class="p-2">${c.phone}</td>
-            <td class="p-2"><span class="bg-gray-100 px-2 py-0.5 rounded text-sm">${c.bikeNumber || 'N/A'}</span></td>
+            <td class="p-2">
+                <button class="bg-gray-100 hover:bg-blue-100 hover:text-blue-700 px-2 py-0.5 rounded text-sm font-mono transition btn-view-bills" data-bike="${c.bikeNumber || ''}" data-name="${c.name}" data-phone="${c.phone}">
+                    ${c.bikeNumber || 'N/A'}
+                </button>
+            </td>
             <td class="p-2 text-sm text-gray-500">${c.lastServiceDate || '-'}</td>
+            <td class="p-2">
+                <button class="text-blue-600 hover:underline text-xs btn-view-bills" data-bike="${c.bikeNumber || ''}" data-name="${c.name}" data-phone="${c.phone}">
+                    <i class="fas fa-receipt mr-1"></i>View
+                </button>
+            </td>
         </tr>`).join('');
+
+    document.querySelectorAll('.btn-view-bills').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const bikeNum = e.currentTarget.getAttribute('data-bike');
+            const custName = e.currentTarget.getAttribute('data-name');
+            const custPhone = e.currentTarget.getAttribute('data-phone');
+            viewBillsByBike(bikeNum, custName, custPhone);
+        });
+    });
+}
+
+async function viewBillsByBike(bikeNumber, customerName, phone) {
+    if (!bikeNumber) {
+        showToast('No bike number recorded for this customer', 'info');
+        return;
+    }
+
+    // Show modal
+    UIElements.modalViewBill.classList.remove('hidden');
+    UIElements.billModalContent.innerHTML = `<p class="text-gray-400 text-center py-6"><i class="fas fa-spinner fa-spin mr-2"></i>Loading bills...</p>`;
+    UIElements.billModalCustomerInfo.innerHTML = `
+        <i class="fas fa-user mr-1"></i> <strong>${customerName}</strong> &nbsp;|
+        <i class="fas fa-phone ml-2 mr-1"></i> ${phone} &nbsp;|
+        <i class="fas fa-motorcycle ml-2 mr-1"></i> <span class="font-mono">${bikeNumber}</span>
+    `;
+
+    const allSales = await localDB.sales.toArray();
+    const bikeSales = allSales
+        .filter(s => s.bikeNumber && s.bikeNumber.toUpperCase() === bikeNumber.toUpperCase())
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    if (bikeSales.length === 0) {
+        UIElements.billModalContent.innerHTML = `<p class="text-gray-400 text-center py-6"><i class="fas fa-info-circle mr-2"></i>No bills found for this bike number.</p>`;
+        return;
+    }
+
+    UIElements.billModalContent.innerHTML = bikeSales.map((sale, idx) => {
+        const itemRows = (sale.items || []).map(i =>
+            `<tr class="border-b last:border-0">
+                <td class="py-1.5 pr-4">${i.itemName}${i.partNumber ? '<br><span class="text-xs text-gray-400 font-mono">' + i.partNumber + '</span>' : ''}</td>
+                <td class="py-1.5 text-center">${i.qty}</td>
+                <td class="py-1.5 text-right">Rs. ${i.price.toFixed(2)}</td>
+                <td class="py-1.5 text-right font-bold">Rs. ${i.total.toFixed(2)}</td>
+            </tr>`
+        ).join('');
+        return `
+        <div class="border rounded-xl overflow-hidden">
+            <div class="bg-gray-50 px-4 py-2 flex justify-between items-center">
+                <span class="font-semibold text-sm text-gray-700"><i class="fas fa-calendar-alt mr-1 text-blue-400"></i>${sale.date}</span>
+                <span class="font-bold text-green-700">Rs. ${(sale.totalAmount || 0).toFixed(2)}</span>
+            </div>
+            <div class="px-4 py-2 text-xs text-gray-500 flex gap-4">
+                <span><i class="fas fa-user-cog mr-1"></i>${sale.technicianName || 'N/A'}</span>
+                <span><i class="fas fa-hashtag mr-1"></i>Bill #${sale.id ? sale.id.slice(-6) : idx + 1}</span>
+            </div>
+            <div class="px-4 pb-3">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-xs text-gray-400 uppercase border-b">
+                            <th class="pb-1 text-left">Item</th>
+                            <th class="pb-1 text-center">Qty</th>
+                            <th class="pb-1 text-right">Rate</th>
+                            <th class="pb-1 text-right">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>${itemRows}</tbody>
+                </table>
+            </div>
+        </div>`;
+    }).join('');
 }
 
 async function renderReports() {
@@ -817,6 +1096,372 @@ async function renderReports() {
             <td class="p-2 font-medium">${s.bikeNumber || '-'}</td>
             <td class="p-2 font-bold text-green-700">Rs. ${(s.totalAmount || 0).toFixed(2)}</td>
         </tr>`).join('');
+}
+
+// -----------------------------------------------------------------------
+// PARTS RECEIVING
+// -----------------------------------------------------------------------
+let _itemHistoryCurrentItemId = null;
+let _itemHistoryCurrentTab = 'sales';
+
+async function openReceivingModal(receiving = null) {
+    // Populate item dropdown
+    await updateReceivingItemDropdown();
+
+    if (receiving) {
+        UIElements.receivingId.value = receiving.id;
+        UIElements.receivingDate.value = receiving.date || getTodayString();
+        UIElements.receivingSupplier.value = receiving.supplier || '';
+        UIElements.receivingItemLink.value = receiving.itemId || '';
+        UIElements.receivingPartName.value = receiving.partName || '';
+        UIElements.receivingPartNumber.value = receiving.partNumber || '';
+        UIElements.receivingQty.value = receiving.qty || '';
+        UIElements.receivingUnitCost.value = receiving.unitCost || '';
+        UIElements.receivingTotalCost.value = receiving.totalCost || '';
+        UIElements.receivingInvoice.value = receiving.invoiceNo || '';
+        UIElements.receivingUpdateStock.checked = false; // don't re-add stock on edit
+        UIElements.receivingNotes.value = receiving.notes || '';
+    } else {
+        UIElements.receivingId.value = '';
+        UIElements.receivingDate.value = getTodayString();
+        UIElements.receivingSupplier.value = '';
+        UIElements.receivingItemLink.value = '';
+        UIElements.receivingPartName.value = '';
+        UIElements.receivingPartNumber.value = '';
+        UIElements.receivingQty.value = '';
+        UIElements.receivingUnitCost.value = '';
+        UIElements.receivingTotalCost.value = '';
+        UIElements.receivingInvoice.value = '';
+        UIElements.receivingUpdateStock.checked = true;
+        UIElements.receivingNotes.value = '';
+    }
+    UIElements.modalAddReceiving.classList.remove('hidden');
+}
+
+function closeReceivingModal() {
+    UIElements.modalAddReceiving.classList.add('hidden');
+}
+
+function calcReceivingTotal() {
+    const qty = parseFloat(UIElements.receivingQty.value) || 0;
+    const unitCost = parseFloat(UIElements.receivingUnitCost.value) || 0;
+    UIElements.receivingTotalCost.value = (qty * unitCost).toFixed(2);
+}
+
+async function updateReceivingItemDropdown() {
+    const items = await localDB.items.toArray();
+    UIElements.receivingItemLink.innerHTML =
+        '<option value="">-- Select Item (auto-fills part name & number) --</option>' +
+        items.map(i => `<option value="${i.id}">${i.itemName}${i.partNumber ? ' [' + i.partNumber + ']' : ''}</option>`).join('');
+}
+
+async function saveReceiving() {
+    const id = UIElements.receivingId.value || Date.now().toString();
+    const isEdit = !!UIElements.receivingId.value;
+
+    const partName = UIElements.receivingPartName.value.trim();
+    const supplier = UIElements.receivingSupplier.value.trim();
+    const qty = parseInt(UIElements.receivingQty.value);
+    const unitCost = parseFloat(UIElements.receivingUnitCost.value);
+
+    if (!partName || !supplier || isNaN(qty) || qty <= 0 || isNaN(unitCost)) {
+        showToast('Please fill all required fields (Date, Supplier, Part Name, Qty, Unit Cost)!', 'error');
+        return;
+    }
+
+    const totalCost = qty * unitCost;
+    const linkedItemId = UIElements.receivingItemLink.value || null;
+
+    const data = {
+        id,
+        date: UIElements.receivingDate.value || getTodayString(),
+        supplier,
+        partName,
+        partNumber: UIElements.receivingPartNumber.value.trim(),
+        itemId: linkedItemId,
+        qty,
+        unitCost,
+        totalCost,
+        invoiceNo: UIElements.receivingInvoice.value.trim(),
+        notes: UIElements.receivingNotes.value.trim(),
+        timestamp: isEdit ? (data && data.timestamp ? data.timestamp : Date.now()) : Date.now()
+    };
+    // Fix timestamp for new records
+    if (!isEdit) data.timestamp = Date.now();
+
+    const shouldUpdateStock = UIElements.receivingUpdateStock.checked && linkedItemId && !isEdit;
+
+    try {
+        if (window.db) {
+            await window.db.ref(`receivings/${id}`).set(data);
+            if (shouldUpdateStock) {
+                const ref = window.db.ref(`items/${linkedItemId}`);
+                const snap = await ref.once('value');
+                if (snap.exists()) {
+                    await ref.update({ quantity: (snap.val().quantity || 0) + qty });
+                }
+            }
+        } else {
+            await localDB.receivings.put(data);
+            if (shouldUpdateStock) {
+                const dbItem = await localDB.items.get(linkedItemId);
+                if (dbItem) {
+                    await localDB.items.update(linkedItemId, { quantity: (dbItem.quantity || 0) + qty });
+                    await renderInventory();
+                    await renderDashboard();
+                    await updateBillingOptions();
+                }
+            }
+            await renderReceivings();
+        }
+        closeReceivingModal();
+        showToast(isEdit ? '✅ Receiving updated!' : `✅ Parts received! ${shouldUpdateStock ? 'Stock updated.' : ''}`);
+    } catch (e) {
+        showToast('Failed to save receiving!', 'error');
+        console.error(e);
+    }
+}
+
+async function renderReceivings() {
+    if (!UIElements.receivingsList) return;
+
+    let receivings = await localDB.receivings.toArray();
+    receivings.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    // Apply filters
+    const search = (UIElements.receivingSearch?.value || '').trim().toLowerCase();
+    const monthFilter = UIElements.receivingFilterMonth?.value || '';
+
+    if (search) {
+        receivings = receivings.filter(r =>
+            (r.supplier || '').toLowerCase().includes(search) ||
+            (r.partName || '').toLowerCase().includes(search) ||
+            (r.partNumber || '').toLowerCase().includes(search) ||
+            (r.invoiceNo || '').toLowerCase().includes(search)
+        );
+    }
+    if (monthFilter) {
+        receivings = receivings.filter(r => (r.date || '').startsWith(monthFilter));
+    }
+
+    // Update stats
+    const allRec = await localDB.receivings.toArray();
+    const nowMonth = new Date();
+    const currentMonthStr = `${nowMonth.getFullYear()}-${String(nowMonth.getMonth() + 1).padStart(2, '0')}`;
+    const monthCost = allRec.filter(r => (r.date || '').startsWith(currentMonthStr))
+        .reduce((s, r) => s + (r.totalCost || 0), 0);
+    const uniqueSuppliers = new Set(allRec.map(r => r.supplier)).size;
+
+    if (UIElements.receivingTotalCount) UIElements.receivingTotalCount.textContent = allRec.length;
+    if (UIElements.receivingMonthCost) UIElements.receivingMonthCost.textContent = monthCost.toFixed(2);
+    if (UIElements.receivingSupplierCount) UIElements.receivingSupplierCount.textContent = uniqueSuppliers;
+
+    if (receivings.length === 0) {
+        UIElements.receivingsList.innerHTML = `<tr><td colspan="9" class="p-6 text-center text-gray-400"><i class="fas fa-truck text-3xl mb-2 block"></i>${search || monthFilter ? 'No records match your filter.' : 'No parts received yet. Click "Add Received Parts" to start.'}</td></tr>`;
+        return;
+    }
+
+    UIElements.receivingsList.innerHTML = receivings.map(r => `
+        <tr class="border-b hover:bg-gray-50">
+            <td class="p-3 text-sm text-gray-600">${r.date || '-'}</td>
+            <td class="p-3 font-medium text-gray-800">
+                <span class="inline-flex items-center gap-1">
+                    <i class="fas fa-truck text-emerald-500 text-xs"></i>
+                    ${r.supplier || '-'}
+                </span>
+            </td>
+            <td class="p-3">${r.partName || '-'}</td>
+            <td class="p-3 font-mono text-xs text-gray-500">${r.partNumber || '<span class="text-gray-300">—</span>'}</td>
+            <td class="p-3 font-bold text-center">${r.qty || 0}</td>
+            <td class="p-3">Rs. ${(r.unitCost || 0).toFixed(2)}</td>
+            <td class="p-3 font-bold text-emerald-700">Rs. ${(r.totalCost || 0).toFixed(2)}</td>
+            <td class="p-3 text-xs text-gray-500 font-mono">${r.invoiceNo || '<span class="text-gray-300">—</span>'}</td>
+            <td class="p-3 flex gap-1">
+                <button class="text-blue-500 hover:bg-blue-50 p-1.5 rounded btn-edit-receiving" data-id="${r.id}" title="Edit">
+                    <i class="fas fa-edit text-xs pointer-events-none"></i>
+                </button>
+                <button class="text-red-500 hover:bg-red-50 p-1.5 rounded btn-delete-receiving" data-id="${r.id}" title="Delete">
+                    <i class="fas fa-trash text-xs pointer-events-none"></i>
+                </button>
+            </td>
+        </tr>`).join('');
+
+    document.querySelectorAll('.btn-edit-receiving').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.getAttribute('data-id');
+            const rec = await localDB.receivings.get(id);
+            if (rec) openReceivingModal(rec);
+        });
+    });
+
+    document.querySelectorAll('.btn-delete-receiving').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            if (!confirm('Delete this receiving record?')) return;
+            const id = e.currentTarget.getAttribute('data-id');
+            if (window.db) {
+                await window.db.ref(`receivings/${id}`).remove();
+            } else {
+                await localDB.receivings.delete(id);
+                await renderReceivings();
+            }
+            showToast('Receiving record deleted', 'info');
+        });
+    });
+}
+
+// -----------------------------------------------------------------------
+// ITEM HISTORY MODAL
+// -----------------------------------------------------------------------
+async function openItemHistoryModal(item) {
+    _itemHistoryCurrentItemId = item.id;
+    _itemHistoryCurrentTab = 'sales';
+
+    UIElements.itemHistoryTitle.textContent = item.itemName;
+    UIElements.itemHistoryInfo.innerHTML = `
+        <div class="flex flex-wrap gap-4 items-center">
+            <span><i class="fas fa-box mr-1"></i><strong>${item.itemName}</strong></span>
+            ${item.partNumber ? `<span class="font-mono text-xs bg-blue-100 px-2 py-0.5 rounded">${item.partNumber}</span>` : ''}
+            <span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded">${item.category}</span>
+            <span>Price: <strong>Rs. ${item.price.toFixed(2)}</strong></span>
+            ${item.costPrice > 0 ? `<span>Cost: <strong>Rs. ${item.costPrice.toFixed(2)}</strong></span>` : ''}
+            <span>Stock: <strong class="${item.quantity <= item.lowStockLimit ? 'text-red-600' : 'text-green-700'}">${item.category === 'Service' ? '∞' : item.quantity}</strong></span>
+        </div>`;
+
+    UIElements.modalItemHistory.classList.remove('hidden');
+    switchItemHistoryTab('sales');
+}
+
+function switchItemHistoryTab(tab) {
+    _itemHistoryCurrentTab = tab;
+    // Update tab button styles
+    if (tab === 'sales') {
+        UIElements.ihTabSales.className = 'py-2 px-4 text-sm font-medium border-b-2 border-blue-500 text-blue-600 mr-2';
+        UIElements.ihTabReceiving.className = 'py-2 px-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700';
+    } else {
+        UIElements.ihTabSales.className = 'py-2 px-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 mr-2';
+        UIElements.ihTabReceiving.className = 'py-2 px-4 text-sm font-medium border-b-2 border-emerald-500 text-emerald-600';
+    }
+    renderItemHistoryContent();
+}
+
+async function renderItemHistoryContent() {
+    const itemId = _itemHistoryCurrentItemId;
+    if (!itemId) return;
+
+    UIElements.itemHistoryContent.innerHTML = `<p class="text-gray-400 text-center py-6"><i class="fas fa-spinner fa-spin mr-2"></i>Loading...</p>`;
+
+    if (_itemHistoryCurrentTab === 'sales') {
+        // Find all sales containing this item
+        const allSales = await localDB.sales.toArray();
+        const itemSales = [];
+        allSales.forEach(sale => {
+            if (!Array.isArray(sale.items)) return;
+            const found = sale.items.find(i => i.id === itemId);
+            if (found) itemSales.push({ sale, lineItem: found });
+        });
+        itemSales.sort((a, b) => (b.sale.timestamp || 0) - (a.sale.timestamp || 0));
+
+        if (itemSales.length === 0) {
+            UIElements.itemHistoryContent.innerHTML = `<div class="text-center py-8 text-gray-400"><i class="fas fa-box-open text-3xl mb-3 block"></i><p>This item has not been sold yet.</p></div>`;
+            return;
+        }
+
+        // Summary
+        const totalQtySold = itemSales.reduce((s, x) => s + x.lineItem.qty, 0);
+        const totalRevenue = itemSales.reduce((s, x) => s + x.lineItem.total, 0);
+
+        UIElements.itemHistoryContent.innerHTML = `
+            <div class="grid grid-cols-3 gap-3 mb-4">
+                <div class="bg-blue-50 rounded-xl p-3 text-center">
+                    <p class="text-xs text-blue-600 font-semibold uppercase">Total sold</p>
+                    <p class="text-xl font-bold text-blue-800">${totalQtySold} units</p>
+                </div>
+                <div class="bg-green-50 rounded-xl p-3 text-center">
+                    <p class="text-xs text-green-600 font-semibold uppercase">Total Revenue</p>
+                    <p class="text-xl font-bold text-green-800">Rs. ${totalRevenue.toFixed(2)}</p>
+                </div>
+                <div class="bg-purple-50 rounded-xl p-3 text-center">
+                    <p class="text-xs text-purple-600 font-semibold uppercase">Transactions</p>
+                    <p class="text-xl font-bold text-purple-800">${itemSales.length}</p>
+                </div>
+            </div>
+            <div class="space-y-2">
+                ${itemSales.map(({ sale, lineItem }) => `
+                <div class="border rounded-xl p-4 hover:bg-gray-50">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="font-semibold text-sm text-gray-800">
+                                <i class="fas fa-calendar-alt mr-1 text-blue-400"></i>${sale.date}
+                                <span class="ml-3 text-gray-400 text-xs font-normal">Bill #${sale.id ? sale.id.slice(-6) : '—'}</span>
+                            </p>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <i class="fas fa-user mr-1"></i>${sale.customerName || 'Walk-in'}
+                                ${sale.bikeNumber ? `<span class="ml-2"><i class="fas fa-motorcycle mr-1"></i><span class="font-mono">${sale.bikeNumber}</span></span>` : ''}
+                                ${sale.technicianName && sale.technicianName !== 'Unspecified' ? `<span class="ml-2"><i class="fas fa-user-cog mr-1"></i>${sale.technicianName}</span>` : ''}
+                            </p>
+                        </div>
+                        <div class="text-right">
+                            <p class="font-bold text-gray-800">Qty: ${lineItem.qty}</p>
+                            <p class="text-green-700 font-bold text-sm">Rs. ${lineItem.total.toFixed(2)}</p>
+                            <p class="text-xs text-gray-400">@ Rs. ${lineItem.price.toFixed(2)}</p>
+                        </div>
+                    </div>
+                </div>`).join('')}
+            </div>`;
+
+    } else {
+        // Receiving history for this item
+        const allRec = await localDB.receivings.toArray();
+        const itemRec = allRec
+            .filter(r => r.itemId === itemId)
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+        if (itemRec.length === 0) {
+            UIElements.itemHistoryContent.innerHTML = `<div class="text-center py-8 text-gray-400"><i class="fas fa-truck text-3xl mb-3 block"></i><p>No receiving records linked to this item.</p><p class="text-xs mt-2">When adding a receiving, link it to this item using the inventory dropdown.</p></div>`;
+            return;
+        }
+
+        const totalQtyReceived = itemRec.reduce((s, r) => s + (r.qty || 0), 0);
+        const totalCostSpent = itemRec.reduce((s, r) => s + (r.totalCost || 0), 0);
+
+        UIElements.itemHistoryContent.innerHTML = `
+            <div class="grid grid-cols-3 gap-3 mb-4">
+                <div class="bg-emerald-50 rounded-xl p-3 text-center">
+                    <p class="text-xs text-emerald-600 font-semibold uppercase">Total Received</p>
+                    <p class="text-xl font-bold text-emerald-800">${totalQtyReceived} units</p>
+                </div>
+                <div class="bg-orange-50 rounded-xl p-3 text-center">
+                    <p class="text-xs text-orange-600 font-semibold uppercase">Total Cost</p>
+                    <p class="text-xl font-bold text-orange-800">Rs. ${totalCostSpent.toFixed(2)}</p>
+                </div>
+                <div class="bg-teal-50 rounded-xl p-3 text-center">
+                    <p class="text-xs text-teal-600 font-semibold uppercase">Suppliers Used</p>
+                    <p class="text-xl font-bold text-teal-800">${new Set(itemRec.map(r => r.supplier)).size}</p>
+                </div>
+            </div>
+            <div class="space-y-2">
+                ${itemRec.map(r => `
+                <div class="border rounded-xl p-4 hover:bg-gray-50">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="font-semibold text-sm text-gray-800">
+                                <i class="fas fa-calendar-alt mr-1 text-emerald-400"></i>${r.date || '-'}
+                            </p>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <i class="fas fa-truck mr-1 text-emerald-500"></i><strong>${r.supplier}</strong>
+                                ${r.invoiceNo ? `<span class="ml-2 font-mono bg-gray-100 px-1 rounded">${r.invoiceNo}</span>` : ''}
+                            </p>
+                            ${r.notes ? `<p class="text-xs text-gray-400 mt-1 italic">${r.notes}</p>` : ''}
+                        </div>
+                        <div class="text-right">
+                            <p class="font-bold text-gray-800">Qty: ${r.qty}</p>
+                            <p class="text-emerald-700 font-bold text-sm">Rs. ${(r.totalCost || 0).toFixed(2)}</p>
+                            <p class="text-xs text-gray-400">@ Rs. ${(r.unitCost || 0).toFixed(2)} each</p>
+                        </div>
+                    </div>
+                </div>`).join('')}
+            </div>`;
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -1018,5 +1663,192 @@ ${todaySales.slice(-5).map(s => `• ${s.customerName} – Bike: ${s.bikeNumber 
     } catch (err) {
         console.error('EmailJS Error:', err);
         showToast(`Email failed: ${err.text || err.message}`, 'error');
+    }
+}
+
+// -----------------------------------------------------------------------
+// BACKUP / EXCEL EXPORT  (SheetJS)
+// -----------------------------------------------------------------------
+
+function showBackupStatus(msg) {
+    const el = document.getElementById('backup-status');
+    const msgEl = document.getElementById('backup-status-msg');
+    if (!el || !msgEl) return;
+    msgEl.textContent = msg;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+async function buildSheetData(type) {
+    if (type === 'sales') {
+        const rows = await localDB.sales.toArray();
+        const headers = ['Date', 'Customer Name', 'Phone', 'Bike Number', 'Technician', 'Items Summary', 'Total Amount (Rs.)'];
+        const data = rows
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+            .map(s => [
+                s.date || '',
+                s.customerName || '',
+                s.phone || '',
+                s.bikeNumber || '',
+                s.technicianName || '',
+                Array.isArray(s.items) ? s.items.map(i => `${i.itemName} x${i.qty}`).join(', ') : '',
+                parseFloat((s.totalAmount || 0).toFixed(2))
+            ]);
+        return { headers, data, name: 'Sales' };
+    }
+
+    if (type === 'customers') {
+        const rows = await localDB.customers.toArray();
+        const headers = ['Name', 'Phone', 'Bike Number', 'Last Service Date'];
+        const data = rows
+            .sort((a, b) => (b.lastServiceDate || '').localeCompare(a.lastServiceDate || ''))
+            .map(c => [c.name || '', c.phone || '', c.bikeNumber || '', c.lastServiceDate || '']);
+        return { headers, data, name: 'Customers' };
+    }
+
+    if (type === 'inventory') {
+        const rows = await localDB.items.toArray();
+        const headers = ['Part Number', 'Item Name', 'Category', 'Cost Price (Rs.)', 'Selling Price (Rs.)', 'Stock Qty', 'Low Stock Limit'];
+        const data = rows.map(i => [
+            i.partNumber || '',
+            i.itemName || '',
+            i.category || '',
+            parseFloat((i.costPrice || 0).toFixed(2)),
+            parseFloat((i.price || 0).toFixed(2)),
+            i.category === 'Service' ? 'Unlimited' : (i.quantity || 0),
+            i.lowStockLimit || 0
+        ]);
+        return { headers, data, name: 'Inventory' };
+    }
+
+    if (type === 'bills') {
+        const sales = await localDB.sales.toArray();
+        const headers = [
+            'Bill ID', 'Date', 'Customer Name', 'Phone', 'Bike Number', 'Technician',
+            'Item Name', 'Part Number', 'Qty', 'Unit Price (Rs.)', 'Line Total (Rs.)', 'Bill Total (Rs.)'
+        ];
+        const data = [];
+        sales
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+            .forEach(s => {
+                const billId = s.id ? 'BILL-' + s.id.slice(-6) : '';
+                (s.items || []).forEach(item => {
+                    data.push([
+                        billId,
+                        s.date || '',
+                        s.customerName || '',
+                        s.phone || '',
+                        s.bikeNumber || '',
+                        s.technicianName || '',
+                        item.itemName || '',
+                        item.partNumber || '',
+                        item.qty || 0,
+                        parseFloat((item.price || 0).toFixed(2)),
+                        parseFloat((item.total || 0).toFixed(2)),
+                        parseFloat((s.totalAmount || 0).toFixed(2))
+                    ]);
+                });
+            });
+        return { headers, data, name: 'Bills' };
+    }
+
+    if (type === 'technicians') {
+        const rows = await localDB.technicians.toArray();
+        const headers = ['ID', 'Name'];
+        const data = rows.map(t => [t.id || '', t.name || '']);
+        return { headers, data, name: 'Technicians' };
+    }
+
+    return null;
+}
+
+function makeWorksheet({ headers, data }) {
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+
+    // Auto column widths
+    ws['!cols'] = headers.map((h, i) => {
+        const maxLen = Math.max(
+            h.length,
+            ...data.map(row => String(row[i] || '').length)
+        );
+        return { wch: Math.min(maxLen + 4, 55) };
+    });
+
+    return ws;
+}
+
+async function exportSheet(type) {
+    const today = getTodayString();
+
+    const btnMap = {
+        sales: 'btn-export-sales',
+        customers: 'btn-export-customers',
+        inventory: 'btn-export-inventory',
+        bills: 'btn-export-bills',
+        technicians: 'btn-export-technicians',
+        all: 'btn-export-all'
+    };
+
+    const labelMap = {
+        sales: '<i class="fas fa-download"></i> Export Sales.xlsx',
+        customers: '<i class="fas fa-download"></i> Export Customers.xlsx',
+        inventory: '<i class="fas fa-download"></i> Export Inventory.xlsx',
+        bills: '<i class="fas fa-download"></i> Export Bills.xlsx',
+        technicians: '<i class="fas fa-download"></i> Export Technicians.xlsx',
+        all: '<i class="fas fa-file-excel text-green-600"></i> Export Full Backup.xlsx'
+    };
+
+    const btnId = btnMap[type];
+    const btn = document.getElementById(btnId);
+
+    // Show loading state
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+    }
+
+    try {
+        if (!window.XLSX) {
+            showToast('Excel library not loaded yet. Please wait a moment and try again.', 'error');
+            return;
+        }
+
+        if (type === 'all') {
+            const wb = XLSX.utils.book_new();
+            for (const t of ['sales', 'customers', 'inventory', 'bills', 'technicians']) {
+                const sheetData = await buildSheetData(t);
+                if (sheetData) {
+                    XLSX.utils.book_append_sheet(wb, makeWorksheet(sheetData), sheetData.name);
+                }
+            }
+            XLSX.writeFile(wb, `MotoPOS_FullBackup_${today}.xlsx`);
+            showBackupStatus(`✅ Full backup exported: MotoPOS_FullBackup_${today}.xlsx (5 sheets)`);
+            showToast('📊 Full backup exported!');
+
+        } else {
+            const sheetData = await buildSheetData(type);
+            if (!sheetData) { showToast('Unknown export type', 'error'); return; }
+
+            if (sheetData.data.length === 0) {
+                showToast(`No ${sheetData.name} records found to export`, 'info');
+                showBackupStatus(`ℹ️ No ${sheetData.name} data to export yet.`);
+                return;
+            }
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, makeWorksheet(sheetData), sheetData.name);
+            XLSX.writeFile(wb, `MotoPOS_${sheetData.name}_${today}.xlsx`);
+            showBackupStatus(`✅ Exported: MotoPOS_${sheetData.name}_${today}.xlsx — ${sheetData.data.length} rows`);
+            showToast(`📥 ${sheetData.name} exported successfully!`);
+        }
+
+    } catch (err) {
+        console.error('Export error:', err);
+        showToast('Export failed. Check browser console for details.', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = labelMap[type] || 'Export';
+        }
     }
 }
