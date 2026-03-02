@@ -2,6 +2,122 @@
 // MOTO POS - app.js  |  Firebase Realtime DB + Dexie Local Cache
 // =====================================================================
 
+// -----------------------------------------------------------------------
+// USER AUTH (localStorage-based)
+// -----------------------------------------------------------------------
+const ALL_TABS = ['dashboard', 'billing', 'inventory', 'customers', 'technicians', 'reports', 'email-settings', 'shop-settings', 'parts-receiving', 'backups', 'users'];
+const CASHIER_DEFAULTS = ['dashboard', 'billing', 'customers'];
+
+function getUsers() {
+    return JSON.parse(localStorage.getItem('posUsers') || '[]');
+}
+
+function saveUsers(users) {
+    localStorage.setItem('posUsers', JSON.stringify(users));
+}
+
+function ensureDefaultAdmin() {
+    let users = getUsers();
+    if (!users.find(u => u.username === 'admin')) {
+        users.unshift({
+            username: 'admin',
+            password: 'admin123',
+            role: 'admin',
+            permissions: ALL_TABS,
+            createdAt: new Date().toISOString()
+        });
+        saveUsers(users);
+    }
+}
+
+function getCurrentUser() {
+    const raw = sessionStorage.getItem('posCurrentUser');
+    return raw ? JSON.parse(raw) : null;
+}
+
+function setCurrentUser(user) {
+    sessionStorage.setItem('posCurrentUser', JSON.stringify(user));
+}
+
+function clearCurrentUser() {
+    sessionStorage.removeItem('posCurrentUser');
+}
+
+function getEffectivePermissions(user) {
+    if (user.role === 'admin') return ALL_TABS;
+    return user.permissions || [];
+}
+
+function applyPermissions(user) {
+    const perms = getEffectivePermissions(user);
+
+    // Show/hide nav links
+    document.querySelectorAll('.nav-link').forEach(link => {
+        const target = link.getAttribute('data-target');
+        if (target === 'users') {
+            // Users tab only for admin
+            const li = link.closest('li');
+            if (li) li.style.display = user.role === 'admin' ? '' : 'none';
+        } else {
+            const li = link.closest('li');
+            if (li) li.style.display = perms.includes(target) ? '' : 'none';
+        }
+    });
+
+    // Update sidebar user name
+    const nameEl = document.getElementById('logged-in-user-name');
+    if (nameEl) nameEl.textContent = `\u{1F464} ${user.username} (${user.role})`;
+
+    // Show login shop name
+    const shop = JSON.parse(localStorage.getItem('shopSettings') || '{}');
+    const loginShopName = document.getElementById('login-shop-name');
+    if (loginShopName && shop.name) loginShopName.textContent = shop.name;
+}
+
+function doLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errEl = document.getElementById('login-error');
+
+    const users = getUsers();
+    const user = users.find(u => u.username === username && u.password === password);
+
+    if (!user) {
+        errEl.classList.remove('hidden');
+        document.getElementById('login-password').value = '';
+        document.getElementById('login-password').focus();
+        return;
+    }
+
+    errEl.classList.add('hidden');
+    setCurrentUser(user);
+    document.getElementById('login-overlay').classList.add('hidden');
+    applyPermissions(user);
+
+    // Navigate to first allowed tab
+    const perms = getEffectivePermissions(user);
+    const firstTab = perms[0];
+    if (firstTab) {
+        const link = document.querySelector(`.nav-link[data-target="${firstTab}"]`);
+        if (link) link.click();
+    }
+
+    showToast(`👋 Welcome, ${user.username}!`);
+}
+
+function doLogout() {
+    clearCurrentUser();
+    // Reset nav
+    document.querySelectorAll('.nav-link').forEach(link => {
+        const li = link.closest('li');
+        if (li) li.style.display = '';
+    });
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-password').value = '';
+    document.getElementById('login-error').classList.add('hidden');
+    document.getElementById('login-overlay').classList.remove('hidden');
+}
+
 // Initialize Local Database (Dexie)
 const localDB = new Dexie('MotoPOS');
 localDB.version(2).stores({
@@ -111,6 +227,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         shopSettingsStatus: document.getElementById('shop-settings-status'),
         billHeaderPreview: document.getElementById('bill-header-preview'),
         sidebarShopName: document.getElementById('sidebar-shop-name'),
+        shopWaEnable: document.getElementById('shop-wa-enable'),
 
         // Parts Receiving
         btnAddReceiving: document.getElementById('btn-add-receiving'),
@@ -146,12 +263,40 @@ document.addEventListener('DOMContentLoaded', async () => {
         itemHistoryContent: document.getElementById('item-history-content'),
         ihTabSales: document.getElementById('ih-tab-sales'),
         ihTabReceiving: document.getElementById('ih-tab-receiving'),
+
+        // Users
+        usersList: document.getElementById('users-list'),
+        btnAddUser: document.getElementById('btn-add-user'),
+        modalAddUser: document.getElementById('modal-add-user'),
+        btnCancelUser: document.getElementById('btn-cancel-user'),
+        btnSaveUser: document.getElementById('btn-save-user'),
+        userEditUsername: document.getElementById('user-edit-username'),
+        userUsername: document.getElementById('user-username'),
+        userPassword: document.getElementById('user-password'),
+        userRole: document.getElementById('user-role'),
     };
 
     setupEventListeners();
     loadEmailJsSettings();
     loadShopSettings();
     await renderAllLocal();
+
+    // Initialize users & show login
+    ensureDefaultAdmin();
+    setupLoginListeners();
+
+    // Update login shop name
+    const shop = JSON.parse(localStorage.getItem('shopSettings') || '{}');
+    const loginShopNameEl = document.getElementById('login-shop-name');
+    if (loginShopNameEl && shop.name) loginShopNameEl.textContent = shop.name;
+
+    // Check if already logged in (session still active)
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+        document.getElementById('login-overlay').classList.add('hidden');
+        applyPermissions(currentUser);
+    }
+    // else login overlay stays visible
 
     // Set today's date as default for receiving form
     if (UIElements.receivingDate) {
@@ -193,6 +338,7 @@ function setupEventListeners() {
             if (target === 'billing') updateBillingOptions();
             if (target === 'technicians') renderTechnicians();
             if (target === 'parts-receiving') renderReceivings();
+            if (target === 'users') renderUsersTab();
         });
     });
 
@@ -284,6 +430,47 @@ function setupEventListeners() {
     // Item History Tabs
     UIElements.ihTabSales.addEventListener('click', () => switchItemHistoryTab('sales'));
     UIElements.ihTabReceiving.addEventListener('click', () => switchItemHistoryTab('receiving'));
+
+    // Logout
+    document.getElementById('btn-logout').addEventListener('click', () => {
+        if (confirm('Logout karanna sure?')) doLogout();
+    });
+
+    // Users modal
+    UIElements.btnAddUser.addEventListener('click', () => openUserModal(null));
+    UIElements.btnCancelUser.addEventListener('click', () => UIElements.modalAddUser.classList.add('hidden'));
+    UIElements.modalAddUser.addEventListener('click', (e) => {
+        if (e.target === UIElements.modalAddUser) UIElements.modalAddUser.classList.add('hidden');
+    });
+    UIElements.btnSaveUser.addEventListener('click', saveUser);
+
+    // Role change -> toggle perm section
+    UIElements.userRole.addEventListener('change', () => {
+        const sec = document.getElementById('user-permissions-section');
+        if (UIElements.userRole.value === 'admin') {
+            sec.style.opacity = '0.4';
+            sec.style.pointerEvents = 'none';
+        } else {
+            sec.style.opacity = '1';
+            sec.style.pointerEvents = '';
+        }
+    });
+
+    // Perm select all / none
+    document.getElementById('perm-select-all').addEventListener('click', () => {
+        document.querySelectorAll('#user-permissions-section input[type=checkbox]').forEach(cb => cb.checked = true);
+    });
+    document.getElementById('perm-select-none').addEventListener('click', () => {
+        document.querySelectorAll('#user-permissions-section input[type=checkbox]').forEach(cb => cb.checked = false);
+    });
+
+    // Password toggle in user modal
+    document.getElementById('user-toggle-pw').addEventListener('click', () => {
+        const inp = document.getElementById('user-password');
+        const icon = document.querySelector('#user-toggle-pw i');
+        if (inp.type === 'password') { inp.type = 'text'; icon.className = 'fas fa-eye-slash text-sm'; }
+        else { inp.type = 'password'; icon.className = 'fas fa-eye text-sm'; }
+    });
 }
 
 // -----------------------------------------------------------------------
@@ -743,8 +930,11 @@ async function handleBikeNumberInput() {
 async function completeSaleAndPrint() {
     // First save the sale
     const saved = await completeSale();
-    // If sale was saved successfully, print
+    // If sale was saved successfully, handle messaging and printing
     if (saved) {
+        // Call WhatsApp first because window.print() is blocking
+        sendWhatsAppMessage(saved);
+        // Then print the bill
         printBill(saved);
     }
 }
@@ -909,6 +1099,48 @@ function printBill(saleDataOverride = null) {
     document.getElementById('print-area').style.display = 'block';
     window.print();
     document.getElementById('print-area').style.display = 'none';
+}
+
+// -----------------------------------------------------------------------
+// WHATSAPP
+// -----------------------------------------------------------------------
+function sendWhatsAppMessage(saleData) {
+    const shop = JSON.parse(localStorage.getItem('shopSettings') || '{}');
+    if (!shop.waEnable) return;
+
+    // Check if phone is valid
+    if (!saleData.phone || saleData.phone === 'N/A' || saleData.phone.length < 5) {
+        console.log("WhatsApp skipped: No valid phone number.");
+        return;
+    }
+
+    const shopName = shop.name || 'Moto POS';
+
+    // Format phone number: remove non-numeric
+    let phoneNum = saleData.phone.replace(/\D/g, '');
+
+    // Convert LK formats (077... or 77...) to 9477...
+    if (phoneNum.length === 10 && phoneNum.startsWith('0')) {
+        phoneNum = '94' + phoneNum.substring(1);
+    } else if (phoneNum.length === 9) {
+        phoneNum = '94' + phoneNum;
+    }
+
+    let message = `*${shopName}*\n\n`;
+    message += `Hi ${saleData.customerName || 'Customer'},\n`;
+    message += `Thank you for choosing us! Here is your bill summary:\n\n`;
+    message += `*Total Amount:* Rs. ${saleData.totalAmount.toFixed(2)}\n`;
+    message += `*Bike No:* ${saleData.bikeNumber || 'N/A'}\n\n`;
+    message += `Have a great day! \u{1F3CD}\ufe0f`;
+
+    const waUrl = `https://wa.me/${phoneNum}?text=${encodeURIComponent(message)}`;
+
+    const waWindow = window.open(waUrl, '_blank');
+
+    // Check if pop-up was blocked
+    if (!waWindow || waWindow.closed || typeof waWindow.closed === 'undefined') {
+        showToast('WhatsApp window blocked! Please allow pop-ups for this site.', 'info');
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -1473,6 +1705,7 @@ function loadShopSettings() {
     if (UIElements.shopAddress) UIElements.shopAddress.value = shop.address || '';
     if (UIElements.shopPhone) UIElements.shopPhone.value = shop.phone || '';
     if (UIElements.shopNote) UIElements.shopNote.value = shop.note || '';
+    if (UIElements.shopWaEnable) UIElements.shopWaEnable.checked = !!shop.waEnable;
 
     if (shop.logo) {
         UIElements.shopLogoPreview.src = shop.logo;
@@ -1494,6 +1727,7 @@ function saveShopSettings() {
     shop.address = UIElements.shopAddress.value.trim();
     shop.phone = UIElements.shopPhone.value.trim();
     shop.note = UIElements.shopNote.value.trim();
+    shop.waEnable = UIElements.shopWaEnable.checked;
     localStorage.setItem('shopSettings', JSON.stringify(shop));
 
     // Update sidebar
@@ -1851,4 +2085,221 @@ async function exportSheet(type) {
             btn.innerHTML = labelMap[type] || 'Export';
         }
     }
+}
+
+// -----------------------------------------------------------------------
+// LOGIN LISTENERS
+// -----------------------------------------------------------------------
+function setupLoginListeners() {
+    document.getElementById('btn-login').addEventListener('click', doLogin);
+
+    // Enter key on password field
+    document.getElementById('login-password').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doLogin();
+    });
+    document.getElementById('login-username').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('login-password').focus();
+    });
+
+    // Password visibility toggle on login screen
+    document.getElementById('login-toggle-pw').addEventListener('click', () => {
+        const inp = document.getElementById('login-password');
+        const icon = document.querySelector('#login-toggle-pw i');
+        if (inp.type === 'password') {
+            inp.type = 'text';
+            icon.className = 'fas fa-eye-slash text-sm';
+        } else {
+            inp.type = 'password';
+            icon.className = 'fas fa-eye text-sm';
+        }
+    });
+}
+
+// -----------------------------------------------------------------------
+// USER MANAGEMENT TAB
+// -----------------------------------------------------------------------
+const PERM_IDS = ['dashboard', 'billing', 'inventory', 'customers', 'technicians', 'reports', 'email-settings', 'shop-settings', 'parts-receiving', 'backups'];
+
+function openUserModal(user = null) {
+    const secEl = document.getElementById('user-permissions-section');
+
+    if (user) {
+        // Edit mode
+        UIElements.userEditUsername.value = user.username;
+        UIElements.userUsername.value = user.username;
+        UIElements.userUsername.disabled = user.username === 'admin'; // protect admin username
+        UIElements.userPassword.value = '';
+        UIElements.userRole.value = user.role || 'custom';
+    } else {
+        // Add mode
+        UIElements.userEditUsername.value = '';
+        UIElements.userUsername.value = '';
+        UIElements.userUsername.disabled = false;
+        UIElements.userPassword.value = '';
+        UIElements.userRole.value = 'cashier';
+    }
+
+    // Set permission checkboxes
+    const perms = user ? (user.role === 'admin' ? PERM_IDS : (user.permissions || [])) : CASHIER_DEFAULTS;
+    PERM_IDS.forEach(p => {
+        const cb = document.getElementById(`perm-${p}`);
+        if (cb) cb.checked = perms.includes(p);
+    });
+
+    // Show/hide perm section opacity based on role
+    const isAdmin = UIElements.userRole.value === 'admin';
+    secEl.style.opacity = isAdmin ? '0.4' : '1';
+    secEl.style.pointerEvents = isAdmin ? 'none' : '';
+
+    UIElements.modalAddUser.classList.remove('hidden');
+}
+
+function saveUser() {
+    const editingUsername = UIElements.userEditUsername.value;
+    const username = UIElements.userUsername.value.trim();
+    const password = UIElements.userPassword.value;
+    const role = UIElements.userRole.value;
+
+    if (!username) {
+        showToast('Username is required!', 'error'); return;
+    }
+
+    let users = getUsers();
+    const isEdit = !!editingUsername;
+
+    // Duplicate check (username must be unique, except when editing same)
+    if (!isEdit && users.find(u => u.username === username)) {
+        showToast('Username already exists!', 'error'); return;
+    }
+    if (isEdit && username !== editingUsername && users.find(u => u.username === username)) {
+        showToast('Username already taken!', 'error'); return;
+    }
+
+    // Password required for new users
+    if (!isEdit && !password) {
+        showToast('Password is required for new users!', 'error'); return;
+    }
+
+    // Collect permissions
+    const permissions = PERM_IDS.filter(p => {
+        const cb = document.getElementById(`perm-${p}`);
+        return cb && cb.checked;
+    });
+
+    if (isEdit) {
+        const idx = users.findIndex(u => u.username === editingUsername);
+        if (idx < 0) { showToast('User not found!', 'error'); return; }
+        users[idx].username = username;
+        if (password) users[idx].password = password;
+        users[idx].role = role;
+        users[idx].permissions = role === 'admin' ? ALL_TABS : permissions;
+    } else {
+        users.push({
+            username,
+            password,
+            role,
+            permissions: role === 'admin' ? ALL_TABS : permissions,
+            createdAt: new Date().toISOString()
+        });
+    }
+
+    saveUsers(users);
+    UIElements.modalAddUser.classList.add('hidden');
+    showToast(isEdit ? `✅ User "${username}" updated!` : `✅ User "${username}" created!`);
+    renderUsersTab();
+
+    // If editing current user, update session
+    const cu = getCurrentUser();
+    if (cu && cu.username === editingUsername) {
+        const updated = users.find(u => u.username === username);
+        if (updated) {
+            setCurrentUser(updated);
+            applyPermissions(updated);
+        }
+    }
+}
+
+function deleteUser(username) {
+    if (username === 'admin') {
+        showToast('Cannot delete the default admin!', 'error'); return;
+    }
+    const cu = getCurrentUser();
+    if (cu && cu.username === username) {
+        showToast('Cannot delete the currently logged-in user!', 'error'); return;
+    }
+    if (!confirm(`Delete user "${username}"?`)) return;
+
+    let users = getUsers();
+    users = users.filter(u => u.username !== username);
+    saveUsers(users);
+    showToast(`User "${username}" deleted`, 'info');
+    renderUsersTab();
+}
+
+function renderUsersTab() {
+    const listEl = document.getElementById('users-list');
+    if (!listEl) return;
+
+    const users = getUsers();
+    const TAB_LABELS = {
+        'dashboard': 'Dashboard', 'billing': 'Billing', 'inventory': 'Inventory',
+        'customers': 'Customers', 'technicians': 'Technicians', 'reports': 'Reports',
+        'email-settings': 'EmailJS', 'shop-settings': 'Shop Settings',
+        'parts-receiving': 'Parts Receiving', 'backups': 'Backups', 'users': 'Users'
+    };
+    const ROLE_BADGE = {
+        'admin': '<span class="bg-yellow-100 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded-full">\ud83d\udc51 Admin</span>',
+        'cashier': '<span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">\ud83d\udcbc Cashier</span>',
+        'custom': '<span class="bg-purple-100 text-purple-700 text-xs font-bold px-2 py-0.5 rounded-full">\u2699\ufe0f Custom</span>'
+    };
+
+    if (users.length === 0) {
+        listEl.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-gray-400"><i class="fas fa-users-slash text-3xl mb-2 block"></i>No users yet</td></tr>`;
+        return;
+    }
+
+    const cu = getCurrentUser();
+
+    listEl.innerHTML = users.map(u => {
+        const permsToShow = u.role === 'admin' ? Object.values(TAB_LABELS).join(', ') :
+            (u.permissions || []).map(p => TAB_LABELS[p] || p).join(', ') || '—';
+        const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-LK') : '—';
+        const isMe = cu && cu.username === u.username;
+        return `
+        <tr class="border-b hover:bg-gray-50 ${isMe ? 'bg-blue-50' : ''}">
+            <td class="p-3">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm">${u.username.charAt(0).toUpperCase()}</div>
+                    <span class="font-medium">${u.username}</span>
+                    ${isMe ? '<span class="text-xs text-blue-500 font-medium">(You)</span>' : ''}
+                </div>
+            </td>
+            <td class="p-3">${ROLE_BADGE[u.role] || u.role}</td>
+            <td class="p-3 text-xs text-gray-500 max-w-xs">${permsToShow}</td>
+            <td class="p-3 text-sm text-gray-400">${created}</td>
+            <td class="p-3 flex gap-1">
+                <button class="text-indigo-600 hover:bg-indigo-50 p-2 rounded btn-edit-user" data-username="${u.username}" title="Edit">
+                    <i class="fas fa-edit text-xs pointer-events-none"></i>
+                </button>
+                <button class="text-red-500 hover:bg-red-50 p-2 rounded btn-delete-user ${u.username === 'admin' ? 'opacity-30 cursor-not-allowed' : ''}" data-username="${u.username}" title="Delete" ${u.username === 'admin' ? 'disabled' : ''}>
+                    <i class="fas fa-trash text-xs pointer-events-none"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    listEl.querySelectorAll('.btn-edit-user').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const uname = e.currentTarget.getAttribute('data-username');
+            const user = getUsers().find(u => u.username === uname);
+            if (user) openUserModal(user);
+        });
+    });
+
+    listEl.querySelectorAll('.btn-delete-user').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const uname = e.currentTarget.getAttribute('data-username');
+            deleteUser(uname);
+        });
+    });
 }
